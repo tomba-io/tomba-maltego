@@ -1,0 +1,12 @@
+"""
+Complete Tomba.io Maltego Integration - Local Settings Template
+Copy this file to settings.py and configure your API credentials
+"""
+
+# =============================================================================
+# TOMBA.IO API CREDENTIALS (REQUIRED)
+# =============================================================================
+# Get your API credentials from: https://app.tomba.io/api
+
+TOMBA_API_KEY = "ta_xxxxxxxxxxxxxxxxxxxx"      # Your API Key (starts with 'ta_')
+TOMBA_SECRET_KEY = "ts_xxxxxxxxxxxxxxxxxxxx"   # Your Secret Key (starts with 'ts_')
