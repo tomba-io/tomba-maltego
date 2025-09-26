@@ -13,6 +13,9 @@ from tomba.services.domain import Domain
 from tomba.services.finder import Finder
 from tomba.services.verifier import Verifier
 from tomba.services.account import Account
+from tomba.services.phone import Phone
+from tomba.services.similar import Similar
+from tomba.services.technology import Technology
 from settings import TOMBA_API_KEY, TOMBA_SECRET_KEY
 from extensions import registry
 # from settings import api_key_setting, secret_key_setting
@@ -35,6 +38,9 @@ class TombaSDKWrapper:
         self.finder_service = Finder(self.client)
         self.verifier_service = Verifier(self.client)
         self.account_service = Account(self.client)
+        self.phone_service = Phone(self.client)
+        self.similar_service = Similar(self.client)
+        self.technology_service = Technology(self.client)
 
     def _handle_request(self, service_call, *args, **kwargs) -> Dict[str, Any]:
         """Execute API call with error handling"""
@@ -114,6 +120,34 @@ class TombaSDKWrapper:
             url=url
         )
 
+    def phone_finder(self, email: str) -> Dict[str, Any]:
+        """Find phone number details"""
+        return self._handle_request(
+            self.phone_service.finder,
+            email=email
+        )
+
+    def phone_validator(self, phone_number: str) -> Dict[str, Any]:
+        """Validate phone number"""
+        return self._handle_request(
+            self.phone_service.validator,
+            phone=phone_number
+        )
+
+    def similar_domain(self, domain: str) -> Dict[str, Any]:
+        """Find similar domains"""
+        return self._handle_request(
+            self.similar_service.websites,
+            domain=domain
+        )
+
+    def technology_lookup(self, domain: str) -> Dict[str, Any]:
+        """Lookup technologies used by a domain"""
+        return self._handle_request(
+            self.technology_service.list,
+            domain=domain
+        )
+
     def get_account_info(self) -> Dict[str, Any]:
         """Get account information"""
         return self._handle_request(
@@ -141,6 +175,9 @@ class BaseTombaTransform(DiscoverableTransform):
         # Try transform settings first
         # api_key = request.getTransformSetting(api_key_setting.id)
         # secret_key = request.getTransformSetting(secret_key_setting.id)
+
+        api_key = None
+        secret_key = None
 
         # # # Fallback to properties
         # if not api_key:
