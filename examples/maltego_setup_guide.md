@@ -37,10 +37,10 @@
 ### Utility
 
 - **Account Info**: Get API usage stats
-- **Phone Finder**: Find phone numbers (soon)
-- **Phone Validator**: Validate phone numbers (soon)
-- **Similar Domains**: Find related domains (soon)
-- **Technology Checker**: Identify tech stack (soon)
+- **Phone Finder**: Find phone numbers
+- **Phone Validator**: Validate phone numbers
+- **Similar Domains**: Find related domains
+- **Technology Checker**: Identify tech stack
 
 ## Troubleshooting
 
