@@ -1,5 +1,4 @@
 from maltego_trx.decorator_registry import TransformRegistry
-# from settings import api_key_setting, secret_key_setting
 
 registry = TransformRegistry(
     owner="Tomba technology web service LLC",
@@ -8,6 +7,9 @@ registry = TransformRegistry(
     seed_ids=["Tomba.Email", "Tomba.Domain", "Tomba.Person"],
 )
 
-registry.version = "0.1"
+registry.version = "1.0.0"
 
-# registry.global_settings = [api_key_setting, secret_key_setting]
+DISCLAIMER = (
+    "Data from the Tomba API (https://tomba.io). Each run sends one API request "
+    "and is charged and rate limited like a direct API call."
+)

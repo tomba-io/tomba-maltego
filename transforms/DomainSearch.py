@@ -1,298 +1,105 @@
 """
-Domain Search Transform
-Find all email addresses associated with a domain
+Domain Search: every email address Tomba has for a domain, with the people and the company.
 """
 
-import logging
-from extensions import registry
-from maltego_trx.entities import Email, Person, Company, Domain
+from extensions import DISCLAIMER, registry
 from maltego_trx.maltego import MaltegoMsg, MaltegoTransform
-from .BaseTombaTransform import BaseTombaTransform
 
-logger = logging.getLogger(__name__)
+from .base import (
+    BaseTombaTransform,
+    TombaClient,
+    add_properties,
+    get_int_property,
+    get_str_property,
+    to_domain,
+)
+
+ORGANIZATION_FIELDS = (
+    ("website_url", "Website"),
+    ("description", "Description"),
+    ("industries", "Industry"),
+    ("founded", "Founded"),
+    ("company_size", "Company Size"),
+    ("company_type", "Company Type"),
+    ("revenue", "Revenue"),
+    ("pattern", "Email Pattern"),
+    ("accept_all", "Accept All"),
+    ("webmail", "Webmail"),
+    ("disposable", "Disposable"),
+    ("keywords", "Keywords"),
+    ("ranking", "Ranking"),
+    ("total_similar", "Similar Companies"),
+    ("location.street_address", "Street Address"),
+    ("location.city", "City"),
+    ("location.state", "State"),
+    ("location.postal_code", "Postal Code"),
+    ("location.country", "Country"),
+    ("social_links.linkedin_url", "LinkedIn"),
+    ("social_links.twitter_url", "Twitter"),
+    ("social_links.facebook_url", "Facebook"),
+    ("social_links.github_url", "GitHub"),
+    ("social_links.instagram_url", "Instagram"),
+    ("social_links.youtube_url", "YouTube"),
+    ("whois.registrar_name", "Registrar"),
+    ("whois.created_date", "Domain Created"),
+    ("last_updated", "Last Updated"),
+)
 
 
 @registry.register_transform(
-    display_name='Tomba - Domain Search',
-    input_entity='maltego.Website',
-    description='Find all email addresses associated with a domain.',
-    output_entities=['maltego.EmailAddress',
-                     'maltego.Person', 'maltego.Company'],
-    disclaimer="Tomba.io - Email Finder & Verifier API",
-
+    display_name="Tomba - Domain Search",
+    input_entity="maltego.Website",
+    description=(
+        "Find the email addresses, people and company behind a website. "
+        "Optional entity properties: tomba.limit (default 10), tomba.page, "
+        "tomba.department, tomba.country, tomba.min_score."
+    ),
+    output_entities=["maltego.EmailAddress", "maltego.Person", "maltego.Company"],
+    disclaimer=DISCLAIMER,
 )
 class DomainSearch(BaseTombaTransform):
-    """Transform to discover all emails for a domain"""
+    """Domain Search on a Website entity."""
 
     @classmethod
-    def create_entities(cls, request: MaltegoMsg, response: MaltegoTransform):
-        transform = cls()
+    def run(cls, request: MaltegoMsg, response: MaltegoTransform, client: TombaClient):
+        domain = to_domain(request.Value)
+        limit = get_int_property(request, "tomba.limit", 10)
+        min_score = get_int_property(request, "tomba.min_score", 0)
 
-        # Initialize Tomba client
-        if not transform.init_tomba_client(request):
-            response.addUIMessage(
-                "🔑 Please configure Tomba.io API credentials:\n\n"
-                "In Transform settings.py, add:\n"
-                "• TOMBA_API_KEY = \"ta_xx\" Your API key (starts with 'ta_')\n"
-                "• TOMBA_SECRET_KEY = \"ts_xx\" Your secret key (starts with 'ts_')\n\n"
-                "Get your keys from: https://app.tomba.io/api",
-                messageType="FatalError"
-            )
-            return
-
-        domain = request.Value.strip().lower()
-
-        # Get transform parameters
-        limit = int(request.getProperty("tomba.limit") or "50")
-        department = request.getProperty("tomba.department") or None
-        confidence_threshold = int(request.getProperty(
-            "tomba.confidence_threshold") or "0")
-        include_organization = request.getProperty(
-            "tomba.include_organization") != "false"
-
-        logger.info(f"Searching emails for domain: {domain} (limit: {limit})")
-
-        # Perform domain search
-        result = transform.tomba_client.domain_search(
-            domain=domain,
+        body = client.domain_search(
+            domain,
+            page=get_int_property(request, "tomba.page"),
             limit=limit,
-            department=department
+            department=get_str_property(request, "tomba.department"),
+            country=get_str_property(request, "tomba.country"),
         )
+        data = body.get("data") or {}
+        organization = data.get("organization") or {}
+        emails = data.get("emails") or []
+        meta = body.get("meta") or {}
 
-        # Handle API errors
-        if transform.handle_api_error(response, result):
-            return
+        if organization:
+            name = organization.get("organization") or domain
+            company = response.addEntity("maltego.Company", name)
+            add_properties(company, organization, ORGANIZATION_FIELDS)
 
-        # Process results
-        if "data" not in result:
-            response.addUIMessage("❌ No data returned from Tomba.io API")
-            return
-
-        data = result["data"]
-        organization = data.get("organization", {})
-        emails = data.get("emails", [])
-        meta = result.get("meta", {})
+        kept = [e for e in emails if (e.get("score") or 0) >= min_score]
+        people = set()
+        for email_data in kept:
+            email_data = dict(email_data, website_url=email_data.get("website_url") or domain)
+            cls.add_email(response, email_data)
+            key = (email_data.get("first_name") or "", email_data.get("last_name") or "")
+            if any(key) and key not in people:
+                people.add(key)
+                cls.add_person(response, key[0], key[1], email_data.get("full_name"), email_data)
 
         if not emails:
-            response.addUIMessage(
-                f"📭 No email addresses found for domain: {domain}"
-            )
-
-            # Still create organization entity if available
-            if include_organization and organization:
-                transform._create_organization_entity(
-                    response, domain, organization)
+            cls.inform(response, f"No email addresses found for {domain}.")
             return
-
-        # Filter emails by confidence threshold
-        filtered_emails = [
-            email for email in emails
-            if email.get("score", 0) >= confidence_threshold
-        ]
-
-        logger.info(
-            f"Found {len(filtered_emails)} emails above confidence threshold {confidence_threshold}")
-
-        # Create organization entity first
-        company_entity = None
-        if include_organization and organization:
-            company_entity = transform._create_organization_entity(
-                response, domain, organization)
-
-        # Create email and person entities
-        person_entities = {}
-
-        for email_data in filtered_emails:
-            email_address = email_data.get("email", "")
-            if not email_address:
-                continue
-
-            # Create email entity
-            email_entity = response.addEntity(Email, email_address)
-
-            # Add comprehensive email properties
-            transform.add_tomba_properties(email_entity, email_data)
-
-            # Add email-specific properties
-            email_type = email_data.get("type", "unknown")
-            email_entity.addProperty(
-                "tomba.email_type",
-                displayName="Email Type",
-                value=email_type.title()
-            )
-
-            # Add confidence with visual indicator
-            confidence = email_data.get("score", 0)
-            email_entity.addProperty(
-                "tomba.confidence_visual",
-                displayName="Confidence",
-                value=transform.format_confidence_message(confidence)
-            )
-
-            # Create person entity if name information is available
-            first_name = email_data.get("first_name", "")
-            last_name = email_data.get("last_name", "")
-
-            if first_name or last_name:
-                full_name = f"{first_name} {last_name}"
-
-                # Avoid duplicate person entities
-                person_key = full_name.lower()
-                if person_key not in person_entities:
-                    person_entity = response.addEntity(Person, full_name)
-                    person_entities[person_key] = person_entity
-
-                    # Add person properties
-                    if first_name:
-                        person_entity.addProperty(
-                            "person.firstnames", value=first_name)
-                    if last_name:
-                        person_entity.addProperty(
-                            "person.lastname", value=last_name)
-
-                    # Add professional information
-                    transform._add_person_professional_info(
-                        person_entity, email_data)
-
-                    # Add social media links
-                    transform._add_social_media_links(
-                        person_entity, email_data)
-
-        # Add summary information
-        total_found = len(emails)
-        total_displayed = len(filtered_emails)
-        total_pages = meta.get("total_pages", 1)
-
-        summary_parts = [
-            f"Found {total_found} emails",
-            f"displaying {total_displayed}",
-        ]
-
-        if confidence_threshold > 0:
-            summary_parts.append(f"(confidence ≥ {confidence_threshold}%)")
-
-        if total_pages > 1:
-            summary_parts.append(f"({total_pages} pages available)")
-
-        transform.add_summary_message(response, " ".join(summary_parts))
-
-        # Add organization summary if available
-        if organization:
-            org_summary_parts = []
-
-            employee_count = organization.get("employee_count")
-            if employee_count:
-                org_summary_parts.append(f"{employee_count:,} employees")
-
-            founded = organization.get("founded")
-            if founded:
-                org_summary_parts.append(f"founded {founded}")
-
-            industries = organization.get("industries")
-            if industries:
-                org_summary_parts.append(f"industry: {industries}")
-
-            if org_summary_parts:
-                transform.add_summary_message(
-                    response,
-                    f"Organization: {' • '.join(org_summary_parts)}"
-                )
-
-    def _create_organization_entity(self, response: MaltegoTransform, domain: str, organization: dict):
-        """Create company/organization entity"""
-        company_name = organization.get("organization", domain)
-        company_entity = response.addEntity(Company, company_name)
-
-        # Add organization properties
-        self.add_tomba_properties(
-            company_entity, organization, prefix="tomba.org")
-
-        # Add specific company properties
-        location = organization.get("location", {})
-        if location:
-            country = location.get("country", "")
-            city = location.get("city", "")
-            if country:
-                company_entity.addProperty("company.country", value=country)
-            if city:
-                company_entity.addProperty("company.city", value=city)
-
-        # Add social media links
-        social_links = organization.get("social_links", {})
-        for platform, url in social_links.items():
-            if url:
-                company_entity.addProperty(
-                    f"tomba.{platform}",
-                    displayName=platform.replace("_url", "").title(),
-                    value=url
-                )
-
-        return company_entity
-
-    def _add_person_professional_info(self, person_entity, email_data):
-        """Add professional information to person entity"""
-        position = email_data.get("position", "")
-        if position:
-            person_entity.addProperty(
-                "tomba.position",
-                displayName="Position",
-                value=position
-            )
-
-        department = email_data.get("department", "")
-        if department:
-            person_entity.addProperty(
-                "tomba.department",
-                displayName="Department",
-                value=department.title()
-            )
-
-        seniority = email_data.get("seniority", "")
-        if seniority:
-            person_entity.addProperty(
-                "tomba.seniority",
-                displayName="Seniority",
-                value=seniority.title()
-            )
-
-        gender = email_data.get("gender", "")
-        if gender:
-            person_entity.addProperty(
-                "tomba.gender",
-                displayName="Gender",
-                value=gender.title()
-            )
-
-        country = email_data.get("country", "")
-        if country:
-            person_entity.addProperty(
-                "person.country",
-                displayName="Country",
-                value=country.upper()
-            )
-
-    def _add_social_media_links(self, person_entity, email_data):
-        """Add social media links to person entity"""
-        linkedin = email_data.get("linkedin", "")
-        if linkedin:
-            person_entity.addProperty(
-                "tomba.linkedin",
-                displayName="LinkedIn",
-                value=linkedin
-            )
-
-        twitter = email_data.get("twitter", "")
-        if twitter:
-            person_entity.addProperty(
-                "tomba.twitter",
-                displayName="Twitter",
-                value=twitter
-            )
-
-        phone_number = email_data.get("phone_number", "")
-        if phone_number:
-            person_entity.addProperty(
-                "person.phone",
-                displayName="Phone Number",
-                value=phone_number
-            )
+        summary = f"{len(kept)} of {len(emails)} addresses shown for {domain}"
+        if meta.get("total") is not None:
+            summary += f" ({meta['total']} in total"
+            if meta.get("total_pages"):
+                summary += f", page {meta.get('current', 1)} of {meta['total_pages']}"
+            summary += ")"
+        cls.inform(response, summary + ".")

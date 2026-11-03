@@ -1,73 +1,42 @@
 #!/usr/bin/env python3
 """
-Test script for Tomba.io transforms
+Live check against the Tomba API with your credentials (settings.py or the
+TOMBA_API_KEY / TOMBA_SECRET_KEY environment variables).
+
+The domain status check is free; the domain search costs one search credit.
+
+    python3 examples/test_transforms.py [domain]
 """
 
-import sys
 import os
+import sys
 
-# Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-
-def test_api_connection():
-    """Test API connection"""
-    print("🔍 Testing Tomba.io API connection...")
-
-    try:
-        from transforms.BaseTombaTransform import TombaSDKWrapper
-        from settings import TOMBA_API_KEY, TOMBA_SECRET_KEY
-
-        client = TombaSDKWrapper(TOMBA_API_KEY, TOMBA_SECRET_KEY)
-        result = client.get_account_info()
-        if "error" in result:
-            print(f"❌ API Error: {result['error']}")
-            return False
-        else:
-            print("✅ API connection successful!")
-            print(
-                f"📧 Account: {result.get('data', {}).get('email', 'Unknown')}")
-            return True
-
-    except ImportError as e:
-        print(f"❌ Import error: {e}")
-        print("💡 Make sure you've configured settings.py")
-        return False
-    except Exception as e:
-        print(f"❌ Connection error: {e}")
-        return False
+from transforms.base import TombaClient, TombaError  # noqa: E402
 
 
-def test_domain_search():
-    """Test domain search functionality"""
-    print("\n🔍 Testing Domain Search...")
+def main():
+    domain = sys.argv[1] if len(sys.argv) > 1 else "tomba.io"
+    client = TombaClient.from_settings()
+    if client is None:
+        print("Credentials not found. Copy settings.py.template to settings.py, or export "
+              "TOMBA_API_KEY and TOMBA_SECRET_KEY. Get them at https://app.tomba.io/api")
+        return 1
 
     try:
-        from transforms.BaseTombaTransform import TombaSDKWrapper
-        from settings import TOMBA_API_KEY, TOMBA_SECRET_KEY
+        status = client.domain_status("gmail.com")
+        print(f"ok   API connection: gmail.com webmail={status.get('webmail')}")
 
-        client = TombaSDKWrapper(TOMBA_API_KEY, TOMBA_SECRET_KEY)
-        result = client.domain_search("tomba.io", limit=10)
-
-        if "error" in result:
-            print(f"❌ Domain search error: {result['error']}")
-        else:
-            meta = result.get('meta', {})
-            print(f"✅ Found {meta.get('total', 0)} emails for tomba.io")
-
-    except Exception as e:
-        print(f"❌ Domain search error: {e}")
+        body = client.domain_search(domain, limit=10)
+        emails = (body.get("data") or {}).get("emails") or []
+        total = (body.get("meta") or {}).get("total", len(emails))
+        print(f"ok   Domain Search: {len(emails)} addresses returned for {domain} ({total} in total)")
+    except TombaError as e:
+        print(f"FAIL {e.message}")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    print("🧪 Tomba.io Transform Test Suite")
-    print("=" * 40)
-
-    # Test API connection
-    if test_api_connection():
-        test_domain_search()
-    else:
-        print("\n💡 To fix API issues:")
-        print("   1. Copy settings.py.template to settings.py")
-        print("   2. Add your Tomba.io API credentials")
-        print("   3. Get credentials from: https://app.tomba.io/api")
+    sys.exit(main())

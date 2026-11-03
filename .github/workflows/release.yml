@@ -1,0 +1,106 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Test and build .mtz
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compile
+        run: python -m compileall -q project.py extensions.py transforms tests examples
+
+      - name: Setup check
+        run: python test_setup.py
+
+      - name: Offline transform tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(python -c 'from extensions import registry; print(registry.version)')" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build tomba_transforms.mtz
+        # Maltego stores an absolute working directory and command for local transforms.
+        # The released file uses a placeholder path; after importing, set each transform's
+        # working directory to your clone, or run `python3 project.py build` locally instead.
+        run: |
+          python project.py build \
+            --working-dir /path/to/tomba-maltego \
+            --python python3 \
+            --version "${{ steps.version.outputs.version }}"
+
+      - name: Check .mtz contents
+        run: |
+          expected=$(python -c 'import project; from extensions import registry; print(len(registry.transform_metas))')
+          found=$(unzip -Z1 tomba_transforms.mtz | grep -c '\.transform$')
+          echo "transforms registered: $expected, in .mtz: $found"
+          test "$expected" -gt 0
+          test "$expected" -eq "$found"
+          unzip -p tomba_transforms.mtz Servers/Local.tas | grep -q '<Transform name="domainsearch">'
+          ! unzip -Z1 tomba_transforms.mtz | grep -q basetombatransform
+
+      - name: Upload build
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tomba-maltego-${{ steps.version.outputs.version }}
+          path: |
+            tomba_transforms.mtz
+            transforms.csv
+            settings.csv
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tomba-maltego-*
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            tomba_transforms.mtz
+            transforms.csv
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            1. Download `tomba_transforms.mtz` below and clone the repository:
+               `git clone https://github.com/tomba-io/tomba-maltego.git && cd tomba-maltego && pip install -r requirements.txt`
+            2. Copy `settings.py.template` to `settings.py` and set your Tomba API key and secret.
+            3. In Maltego, choose **Import | Export Config > Import Config** and select `tomba_transforms.mtz`.
+            4. The file uses the placeholder working directory `/path/to/tomba-maltego`. Set each Tomba transform's working directory to your clone, or skip the download and run `python3 project.py build` in the clone to produce an `.mtz` with your real paths.

@@ -1,61 +1,40 @@
-# Maltego Setup Guide for Tomba.io Transforms
+# Maltego Setup Guide for the Tomba Transforms
 
-## Quick Setup Steps
+The full guide, with every transform and its options, is in the [README](../README.md).
 
-1. **Start Transform Server**
+## Quick setup
 
-   ```bash
-   maltego-trx start .
-   ```
+1. Clone the repository and install the dependencies (Python 3.10+):
 
-2. **Add to Maltego**
+    ```bash
+    git clone https://github.com/tomba-io/tomba-maltego.git
+    cd tomba-maltego
+    pip install -r requirements.txt
+    ```
 
-   - Open Maltego and using Import Config, import the tomba_transforms.mtz file from the repository
+2. Add your credentials from [app.tomba.io/api](https://app.tomba.io/api):
 
-3. **Configure API Credentials**
-   - In settings.py
-   - Add:
-     - `TOMBA_API_KEY`: Your API key (starts with 'ta\_')
-     - `TOMBA_SECRET_KEY`: Your secret key (starts with 'ts\_')
+    ```bash
+    cp settings.py.template settings.py
+    # set TOMBA_API_KEY (ta_...) and TOMBA_SECRET_KEY (ts_...)
+    ```
 
-## Available Transforms
+3. Download `tomba_transforms.mtz` from the [latest release](https://github.com/tomba-io/tomba-maltego/releases/latest).
 
-### Core Discovery
+4. In Maltego, choose **Import | Export > Import Config** and select `tomba_transforms.mtz`.
 
-- **Domain Search**: Domain → Emails + People + Company
+5. In **Transforms > Transform Manager**, set each Tomba transform's **Working directory** to your clone. The release file uses the placeholder `/path/to/tomba-maltego`. If you use a virtual environment, also set **Command line** to its Python.
 
-### Email Analysis
+## Check your setup
 
-- **Email Verifier**: Email → Verified Email
-- **Email Enrichment**: Email → Enhanced Data
-
-### Content & Social
-
-- **Author Finder**: URL → Author Email
-- **LinkedIn Finder**: LinkedIn URL → Email
-
-### Utility
-
-- **Account Info**: Get API usage stats
-- **Phone Finder**: Find phone numbers
-- **Phone Validator**: Validate phone numbers
-- **Similar Domains**: Find related domains
-- **Technology Checker**: Identify tech stack
+```bash
+python3 test_setup.py                 # dependencies and credentials, no API request
+python3 examples/test_transforms.py   # live: a free domain status check and one domain search
+python3 project.py local emailcount stripe.com
+```
 
 ## Troubleshooting
 
-**"Please configure API credentials"**
-
-- Add API keys in Transform Hub → Server Settings
-- Verify keys are correct in Tomba.io dashboard
-
-**"Rate limit exceeded"**
-
-- Wait before making more requests
-- Upgrade your Tomba.io plan for higher limits
-
-**"No results found"**
-
-- Try different domains/emails
-- Check if data exists publicly
-- Verify domain has email addresses
+- **"Tomba API credentials are missing"**: create `settings.py`. Maltego doesn't pass shell environment variables to local transforms.
+- **The transform fails to start**: the working directory or Python command in the transform settings is wrong. Fix them in the Transform Manager; the command line must be a Python that has the dependencies installed.
+- **"Not enough Tomba credits" / "rate limit reached"**: see [Usage and quotas](https://docs.tomba.io/usage-and-quotas) and [Rate limits](https://docs.tomba.io/rate-limits).
